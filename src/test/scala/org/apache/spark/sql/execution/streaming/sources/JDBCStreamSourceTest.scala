@@ -171,4 +171,86 @@ class JDBCStreamSourceTest extends FlatSpec with Matchers with LocalFilesSupport
 
     out.stop()
   }
+
+  it should "load only new rows in each batch by jdbc with numeric offset column with specified offset value" in {
+    val offsetColumn = "id"
+    val outputTableName = "outTable"
+    val expectedBefore = inputData.toDF(columns: _*).orderBy(offsetColumn)
+    expectedBefore.write.mode("overwrite").format("jdbc").options(jdbcOptions + ("dbtable" -> "source")).save()
+    val fmt = "jdbc-streaming"
+
+    val tmpCheckpoint: String = s"${createLocalTempDir("checkopoint")}" //"/tmp/checkopoint1"//
+
+    val stream = spark.readStream
+      .format(fmt)
+      .options(jdbcOptions + ("dbtable" -> "source") + ("offsetColumn" -> offsetColumn) + ("startingoffsets" -> "3"))
+      .load
+
+    val out = stream.writeStream
+      .option("checkpointLocation", tmpCheckpoint)
+      .outputMode("append")
+      .format("console")
+      .queryName(outputTableName)
+      .start()
+
+    out.processAllAvailable()
+
+    //    val actualBefore = spark.sql(s"select * from $outputTableName").orderBy(offsetColumn)
+    //
+    //    assertDataFrameEquals(expectedBefore, actualBefore)
+
+    val updated = Seq((Some(6), "666",  Timestamp.valueOf("2017-03-15 03:04:00"), Date.valueOf("2019-01-06"))).toDF(columns: _*)
+    updated.write.mode("append").format("jdbc").options(jdbcOptions + ("dbtable" -> "source")).save()
+
+    out.processAllAvailable()
+    //    val actualAfter = spark.sql(s"select * from $outputTableName").orderBy(offsetColumn)
+    //
+    //
+    //    val expectedAfter = expectedBefore.union(updated).orderBy(offsetColumn)
+    //
+    //    assertDataFrameEquals(expectedAfter, actualAfter)
+
+    out.stop()
+  }
+
+  it should "load only new rows in each batch by jdbc with numeric offset column with specified offset 'latest'" in {
+    val offsetColumn = "id"
+    val outputTableName = "outTable"
+    val expectedBefore = inputData.toDF(columns: _*).orderBy(offsetColumn)
+    expectedBefore.write.mode("overwrite").format("jdbc").options(jdbcOptions + ("dbtable" -> "source")).save()
+    val fmt = "jdbc-streaming"
+
+    val tmpCheckpoint: String = s"${createLocalTempDir("checkopoint")}" //
+
+    val stream = spark.readStream
+      .format(fmt)
+      .options(jdbcOptions + ("dbtable" -> "source") + ("offsetColumn" -> offsetColumn) + ("startingoffsets" -> "latest"))
+      .load
+
+    val out = stream.writeStream
+      .option("checkpointLocation", tmpCheckpoint)
+      .outputMode("append")
+      .format("console")
+      .queryName(outputTableName)
+      .start()
+
+    out.processAllAvailable()
+
+    //    val actualBefore = spark.sql(s"select * from $outputTableName").orderBy(offsetColumn)
+    //
+    //    assertDataFrameEquals(expectedBefore, actualBefore)
+
+    val updated = Seq((Some(6), "666",  Timestamp.valueOf("2017-03-15 03:04:00"), Date.valueOf("2019-01-06"))).toDF(columns: _*)
+    updated.write.mode("append").format("jdbc").options(jdbcOptions + ("dbtable" -> "source")).save()
+
+    out.processAllAvailable()
+    //    val actualAfter = spark.sql(s"select * from $outputTableName").orderBy(offsetColumn)
+    //
+    //
+    //    val expectedAfter = expectedBefore.union(updated).orderBy(offsetColumn)
+    //
+    //    assertDataFrameEquals(expectedAfter, actualAfter)
+
+    out.stop()
+  }
 }

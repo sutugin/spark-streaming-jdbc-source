@@ -7,4 +7,13 @@ indicating the name of the column on which the offset will be taken(the column m
  
 - See the tests for usage examples.
 
-- ToDo: Support other data types for offsets.
+For read at the specified offset ("startingoffset" parameter"):
+- For the date specified in the format "2019-01-30"
+- For timestamp - "2019-01-30 00: 10: 00"
+- To read from the end- "latest"
+- To read the earliest- "earliest" (default value)
+
+### ToDo: 
+- Support other data types for offsets.
+- Validate input options.
+- make 'maxoffsetspertrigger' property/
