@@ -6,7 +6,7 @@ scalaVersion := "2.11.12"
 
 parallelExecution in ThisBuild := false
 
-lazy val sparkVersion = "2.0.0"
+lazy val sparkVersion = "2.3.1"
 
 libraryDependencies ++= Seq(
   "org.apache.spark" %% "spark-core" % sparkVersion % "provided",
