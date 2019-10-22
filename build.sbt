@@ -1,5 +1,3 @@
-import Dependencies._
-
 name := "spark-streaming-jdbc-source"
 
 version := "0.1"
@@ -8,7 +6,15 @@ scalaVersion := "2.11.12"
 
 parallelExecution in ThisBuild := false
 
-libraryDependencies ++= Seq(sparkCore % "provided", sparkSql % "provided", scalatest % "test", h2database % "test", sparkTestingBase % "test")
+lazy val sparkVersion = "2.0.0"
+
+libraryDependencies ++= Seq(
+  "org.apache.spark" %% "spark-core" % sparkVersion % "provided",
+  "org.apache.spark" %% "spark-sql" % sparkVersion % "provided",
+  "org.scalatest" %% "scalatest" % "3.0.8" % "test",
+  "com.h2database" % "h2" % "1.4.196" % "test",
+  "com.holdenkarau" %% "spark-testing-base" % "2.3.2_0.12.0" % "test"
+)
 
 assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false)
 
@@ -43,23 +49,6 @@ scalacOptions ++= Seq(
 
 logBuffered in Test := false
 
-//
-//lazy val commonSettings = Seq(
-//  scalacOptions ++= compilerOptions,
-//  parallelExecution in Test := false,
-//  fork := true,
-//  ,
-//  resolvers ++= Seq(
-//    "sonatype-releases" at "https://oss.sonatype.org/content/repositories/releases/",
-//    "Typesafe repository" at "http://repo.typesafe.com/typesafe/releases/",
-//    "Second Typesafe repo" at "http://repo.typesafe.com/typesafe/maven-releases/",
-//    "Artima Maven Repository" at "http://repo.artima.com/releases",
-//    "hdpSpark" at "http://repo.hortonworks.com/content/repositories/releases/",
-//    "datanucleus" at "http://www.datanucleus.org/downloads/maven2/",
-//    Resolver.sonatypeRepo("public")
-//  )
-//)
-
 assemblyMergeStrategy in assembly := {
   case m if m.toLowerCase.endsWith("manifest.mf")     => MergeStrategy.discard
   case m if m.toLowerCase.matches("meta-inf.*\\.sf$") => MergeStrategy.discard
@@ -69,3 +58,5 @@ assemblyMergeStrategy in assembly := {
   case _ => MergeStrategy.first
 }
 
+addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
+addCommandAlias("check", "all scalafmtSbtCheck scalafmtCheck test:scalafmtCheck")

@@ -16,4 +16,4 @@ For read at the specified offset ("startingoffset" parameter"):
 ### ToDo: 
 - Support other data types for offsets.
 - Validate input options.
-- make 'maxoffsetspertrigger' property/
+- make 'maxoffsetspertrigger' property.
