@@ -11,6 +11,7 @@ lazy val sparkVersion = "2.3.1"
 libraryDependencies ++= Seq(
   "org.apache.spark" %% "spark-core" % sparkVersion % "provided",
   "org.apache.spark" %% "spark-sql" % sparkVersion % "provided",
+  "org.apache.spark" %% "spark-catalyst" % sparkVersion % "provided",
   "org.scalatest" %% "scalatest" % "3.0.8" % "test",
   "com.h2database" % "h2" % "1.4.196" % "test",
   "com.holdenkarau" %% "spark-testing-base" % "2.3.2_0.12.0" % "test"
