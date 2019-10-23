@@ -1,6 +1,6 @@
 lazy val defaultSparkVersion = "2.3.2"
 val sparkVersion = settingKey[String]("Spark version")
-val jdbcStreamingSourceVersion = settingKey[String]("Spark testing base version without Spark version part")
+val jdbcStreamingSourceVersion = settingKey[String]("Spark streaming jdbc source version without Spark version part")
 
 lazy val root = (project in file("."))
   .settings(
@@ -88,7 +88,7 @@ lazy val publishSettings = Seq(
     false
   },
   licenses := Seq("Apache License 2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0.html")),
-  homepage := Some(url("https://github.com/holdenk/spark-testing-base")),
+  homepage := Some(url("https://github.com/sutugin/spark-streaming-jdbc-source")),
   scmInfo := Some(
     ScmInfo(
       url("https://github.com/sutugin/spark-streaming-jdbc-source.git"),
