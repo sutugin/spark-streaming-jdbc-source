@@ -1,54 +1,105 @@
-name := "spark-streaming-jdbc-source"
+lazy val defaultSparkVersion = "2.3.2"
+val sparkVersion = settingKey[String]("Spark version")
+val jdbcStreamingSourceVersion = settingKey[String]("Spark testing base version without Spark version part")
 
-version := "0.1"
+lazy val root = (project in file("."))
+  .settings(
+    name := "spark-streaming-jdbc-source",
+    commonSettings,
+    publishSettings,
+    crossScalaVersions := {
+      if (sparkVersion.value >= "2.4.0") {
+        Seq("2.12.8")
+      } else if (sparkVersion.value >= "2.3.0") {
+        Seq("2.11.12")
+      } else {
+        Seq("2.10.6", "2.11.11")
+      }
+    },
+    libraryDependencies ++= Seq(
+      "org.apache.spark" %% "spark-core" % sparkVersion.value % "provided",
+      "org.apache.spark" %% "spark-sql" % sparkVersion.value % "provided"
+    ) ++ testDependencies
+  )
 
-scalaVersion := "2.11.12"
+val commonSettings = Seq(
+  organization := "sutugin",
+  publishMavenStyle := true,
+  sparkVersion := System.getProperty("sparkVersion", defaultSparkVersion),
+  jdbcStreamingSourceVersion := "0.0.1",
+  version := sparkVersion.value + "_" + jdbcStreamingSourceVersion.value,
+  scalaVersion := {
+    if (sparkVersion.value >= "2.4.0") {
+      "2.12.8"
+    } else if (sparkVersion.value >= "2.0.0") {
+      "2.11.11"
+    } else {
+      "2.10.6"
+    }
+  },
+  scalacOptions ++= Seq(
+    "-deprecation", // Emit warning and location for usages of deprecated APIs.
+    "-encoding",
+    "utf-8", // Specify character encoding used by source files.
+    "-explaintypes", // Explain type errors in more detail.
+    "-feature", // Emit warning and location for usages of features that should be imported explicitly.
+    "-language:existentials", // Existential types (besides wildcard types) can be written and inferred
+    "-language:experimental.macros", // Allow macro definition (besides implementation and application)
+    "-language:higherKinds", // Allow higher-kinded types
+    "-language:implicitConversions", // Allow definition of implicit functions called views
+    "-unchecked", // Enable additional warnings where generated code depends on assumptions.
+    "-Xcheckinit", // Wrap field accessors to throw an exception on uninitialized access.
+    "-Xfatal-warnings", // Fail the compilation if there are any warnings.
+    "-Xfuture", // Turn on future language features.
+    "-Yno-adapted-args", // Do not adapt an argument list (either by inserting () or creating a tuple) to match the receiver.
+    "-Ywarn-dead-code", // Warn when dead code is identified.
+    "-Ywarn-inaccessible", // Warn about inaccessible types in method signatures.
+    "-Ywarn-infer-any", // Warn when a type argument is inferred to be `Any`.
+    "-Ywarn-nullary-override", // Warn when non-nullary `def f()' overrides nullary `def f'.
+    "-Ywarn-nullary-unit", // Warn when nullary methods return Unit.
+    "-Ywarn-numeric-widen", // Warn when numerics are widened.
+    "-Ywarn-unused", // Warn is unused.
+    "-Ywarn-value-discard" // Warn when non-Unit expression results are unused.
+  ),
+  javacOptions ++= {
+    if (sparkVersion.value >= "2.1.1") {
+      Seq("-source", "1.8", "-target", "1.8")
+    } else {
+      Seq("-source", "1.7", "-target", "1.7")
+    }
+  },
+  parallelExecution in Test := false,
+  fork := true
 
-parallelExecution in ThisBuild := false
+//  scalastyleSources in Compile ++= {unmanagedSourceDirectories in Compile}.value,
+//  scalastyleSources in Test ++= {unmanagedSourceDirectories in Test}.value,
+)
 
-lazy val sparkVersion = "2.3.1"
-
-libraryDependencies ++= Seq(
-  "org.apache.spark" %% "spark-core" % sparkVersion % "provided",
-  "org.apache.spark" %% "spark-sql" % sparkVersion % "provided",
-  "org.apache.spark" %% "spark-catalyst" % sparkVersion % "provided",
+// test libraries
+lazy val testDependencies = Seq(
   "org.scalatest" %% "scalatest" % "3.0.8" % "test",
   "com.h2database" % "h2" % "1.4.196" % "test",
   "com.holdenkarau" %% "spark-testing-base" % "2.3.2_0.12.0" % "test"
 )
 
-assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false)
-
-fork in Test := true
-
-logBuffered in Test := false
-
-scalacOptions ++= Seq(
-  "-deprecation", // Emit warning and location for usages of deprecated APIs.
-  "-encoding",
-  "utf-8", // Specify character encoding used by source files.
-  "-explaintypes", // Explain type errors in more detail.
-  "-feature", // Emit warning and location for usages of features that should be imported explicitly.
-  "-language:existentials", // Existential types (besides wildcard types) can be written and inferred
-  "-language:experimental.macros", // Allow macro definition (besides implementation and application)
-  "-language:higherKinds", // Allow higher-kinded types
-  "-language:implicitConversions", // Allow definition of implicit functions called views
-  "-unchecked", // Enable additional warnings where generated code depends on assumptions.
-  "-Xcheckinit", // Wrap field accessors to throw an exception on uninitialized access.
-  "-Xfatal-warnings", // Fail the compilation if there are any warnings.
-  "-Xfuture", // Turn on future language features.
-  "-Yno-adapted-args", // Do not adapt an argument list (either by inserting () or creating a tuple) to match the receiver.
-  "-Ywarn-dead-code", // Warn when dead code is identified.
-  "-Ywarn-inaccessible", // Warn about inaccessible types in method signatures.
-  "-Ywarn-infer-any", // Warn when a type argument is inferred to be `Any`.
-  "-Ywarn-nullary-override", // Warn when non-nullary `def f()' overrides nullary `def f'.
-  "-Ywarn-nullary-unit", // Warn when nullary methods return Unit.
-  "-Ywarn-numeric-widen", // Warn when numerics are widened.
-  "-Ywarn-unused", // Warn is unused.
-  "-Ywarn-value-discard" // Warn when non-Unit expression results are unused.
+// publish settings
+lazy val publishSettings = Seq(
+  pomIncludeRepository := { _ =>
+    false
+  },
+  licenses := Seq("Apache License 2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0.html")),
+  homepage := Some(url("https://github.com/holdenk/spark-testing-base")),
+  scmInfo := Some(
+    ScmInfo(
+      url("https://github.com/sutugin/spark-streaming-jdbc-source.git"),
+      "scm:git@github.com:sutugin/spark-streaming-jdbc-source.git"
+    )
+  ),
+  developers := List(
+    Developer("sutugin", "Andrey Sutugin", "sutuginandrey@gmail.com", url("https://www.linkedin.com/in/sutugin"))
+  )
 )
 
-logBuffered in Test := false
 
 assemblyMergeStrategy in assembly := {
   case m if m.toLowerCase.endsWith("manifest.mf")     => MergeStrategy.discard
