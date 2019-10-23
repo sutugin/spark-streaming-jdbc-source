@@ -1,19 +1,68 @@
+## Spark structured streaming JDBC source 
 
-# This repository contains custom jdbc source for spark structured streaming 
+- ### Overview:
 
-- All parameters are set as in a normal, non-streaming, JDBC connection (https://spark.apache.org/docs/latest/sql-data-sources-jdbc.html),
-except that the option must add the property "offsetColumn", 
-indicating the name of the column on which the offset will be taken(the column must be a number/date/ timestamp).
- 
-- See the tests for usage examples.
+A library for querying JDBC data with Apache Spark Structured Streaming, for Spark SQL and DataFrames.
 
-For read at the specified offset ("startingoffset" parameter"):
-- For the date specified in the format "2019-01-30"
-- For timestamp - "2019-01-30 00: 10: 00"
-- To read from the end- "latest"
-- To read the earliest- "earliest" (default value)
+- ### Build from Source
+``
+sbt "set test in assembly := {}" clean assembly
+``
 
-### ToDo: 
-- Support other data types for offsets.
+- ### Quick Example
+
+```
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.SparkSession
+
+val spark = SparkSession
+  .builder
+  .appName("StructuredJDBC")
+  .getOrCreate()
+  
+import spark.implicits._
+
+val jdbcOptions = Map(
+    "user" -> "user",
+    "password" -> "password",
+    "database" -> "db name",
+    "driver" -> "org.h2.Driver",
+    "url" -> "jdbc:h2:mem:myDb;DB_CLOSE_DELAY=-1;DATABASE_TO_UPPER=false"
+  )
+
+// Create DataFrame representing the stream of input lines from jdbc
+val stream = spark.readStream
+      .format("jdbc-streaming")
+      .options(jdbcOptions + ("dbtable" -> "source") + ("offsetColumn" -> "offsetColumn"))
+      .load
+
+// Start running the query that prints 'select result' to the console
+val query = stream.writeStream
+  .outputMode("append")
+  .format("console")
+  .start()
+
+query.awaitTermination()
+
+```
+
+- ### Features
+
+
+All JDBC connection parameters are set as in non-streaming reading (https://spark.apache.org/docs/latest/sql-data-sources-jdbc.html),
+except for the following:
+
+###### ``offsetColumn`` : Required field, name of the column by which changes will be tracked. The following column types are supported:
+- IntegerType 
+- LongType
+- TimestampType
+- DataType
+
+###### ``startingoffset`` : The start point when a query is started, either ``"earliest"`` (default value) which is from the min offsetColumn value, ``"latest"`` which is just from the max offsetColumn value, or a string specifying a starting offset:
+- IntegerType or LongType ``"0"`` 
+- TimestampType ``"2019-01-30 00:10:00"``
+- DataType ``"2019-03-20""``
+
+### ToDo:
 - Validate input options.
-- make 'maxoffsetspertrigger' property.
+- make 'maxoffsetspertrigger' property. 
