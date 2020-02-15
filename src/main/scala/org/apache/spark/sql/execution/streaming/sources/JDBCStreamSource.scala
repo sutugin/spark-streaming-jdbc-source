@@ -126,7 +126,7 @@ class JDBCStreamSource(
     }
 
     val strFilter =
-      s"$offsetColumn >= CAST('$s' AS ${offsetColumnType.sql}) and $offsetColumn < CAST('$e' AS ${offsetColumnType.sql})"
+      s"$offsetColumn >= CAST('$s' AS ${offsetColumnType.sql}) and $offsetColumn <= CAST('$e' AS ${offsetColumnType.sql})"
 
     val filteredDf = df.where(strFilter)
     val rdd = filteredDf.queryExecution.toRdd
