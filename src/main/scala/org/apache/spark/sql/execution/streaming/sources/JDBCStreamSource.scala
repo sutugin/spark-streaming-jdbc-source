@@ -4,11 +4,9 @@ import java.sql.{Date, Timestamp}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.util.CaseInsensitiveMap
 import org.apache.spark.sql.execution.streaming._
+import org.apache.spark.sql.execution.streaming.sources.offset.{BatchOffsetRange, EarliestOffsetRangeLimit, ExclusiveJDBCOffsetFilterType, InclusiveJDBCOffsetFilterType, JDBCOffset, JDBCOffsetFilterType, JDBCOffsetRangeLimit, LatestOffsetRangeLimit, OffsetWithColumn, OffsetRange, SpecificOffsetRangeLimit}
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.sources.v2.DataSourceV2
-import org.apache.spark.sql.sources.{DataSourceRegister, StreamSourceProvider}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{AnalysisException, Column, DataFrame, SQLContext}
 
@@ -23,12 +21,49 @@ class JDBCStreamSource(
 ) extends Source
     with Logging {
 
+  import JDBCStreamSource._
   import sqlContext.implicits._
-  import JDBCStreamSourceProvider._
 
-  private val offsetColumn = parameters(OFFSET_COLUMN)
+  // ToDo: implement
+  // private val maxOffsetsPerTrigger = None
 
-  private val maxOffsetsPerTrigger = None
+  private val offsetColumn =
+    parameters.getOrElse(OFFSET_COLUMN, throw new IllegalArgumentException(s"Parameter not found: $OFFSET_COLUMN"))
+
+  override def schema: StructType = df.schema
+
+  private val offsetColumnType = getType(offsetColumn, schema)
+
+  private var currentOffset: Option[JDBCOffset] = None
+
+  private def getOffsetValue(sortFunc: String => Column) = {
+    val data = df.select(offsetColumn).orderBy(sortFunc(offsetColumn))
+    Try {
+      offsetColumnType match {
+        case _: TimestampType => data.as[Timestamp].first()
+        case _: LongType      => data.as[Long].first()
+        case _: IntegerType   => data.as[Int].first()
+        case _: FloatType     => data.as[Float].first()
+        case _: DoubleType    => data.as[Double].first()
+        case _: DataType      => data.as[java.sql.Date].first()
+      }
+    } match {
+      case Success(value) => Some(value.toString)
+      case Failure(ex)    => logWarning(s"Not found offset ${ex.getStackTrace.mkString("\n")}"); None
+    }
+  }
+
+  private def initFirstOffset(): Unit = {
+    val start = startingOffset match {
+      case EarliestOffsetRangeLimit    => SpecificOffsetRangeLimit(getOffsetValue(asc).get)
+      case LatestOffsetRangeLimit      => SpecificOffsetRangeLimit(getOffsetValue(desc).get)
+      case SpecificOffsetRangeLimit(p) => SpecificOffsetRangeLimit(p)
+    }
+    val end = SpecificOffsetRangeLimit(getOffsetValue(desc).get)
+
+    val offsetRange = OffsetRange(Some(start.toString), Some(end.toString))
+    currentOffset = Some(JDBCOffset(OffsetWithColumn(offsetColumn, offsetRange)))
+  }
 
   private val startingOffset = {
     val s = parameters.get(STARTING_OFFSETS_OPTION_KEY)
@@ -41,151 +76,129 @@ class JDBCStreamSource(
         case JDBCOffsetRangeLimit.LATEST   => LatestOffsetRangeLimit
         case v =>
           offsetColumnType match {
-            case _: IntegerType | LongType => SpecificOffsetRangeLimit(v.toLong)
-            case _: TimestampType          => SpecificOffsetRangeLimit(Timestamp.valueOf(v).getTime)
-            case _: DataType               => SpecificOffsetRangeLimit(Date.valueOf(v).getTime)
+            case _: LongType      => SpecificOffsetRangeLimit(v.toLong)
+            case _: IntegerType   => SpecificOffsetRangeLimit(v.toInt)
+            case _: FloatType     => SpecificOffsetRangeLimit(v.toFloat)
+            case _: DoubleType    => SpecificOffsetRangeLimit(v.toDouble)
+            case _: TimestampType => SpecificOffsetRangeLimit(Timestamp.valueOf(v).getTime)
+            case _: DataType      => SpecificOffsetRangeLimit(Date.valueOf(v).getTime)
           }
       }
 
     }
   }
 
-  private lazy val initialOffsets = {
-    val metadataLog = new JDBCStreamingSourceInitialOffsetWriter(sqlContext.sparkSession, metadataPath)
-    metadataLog.get(0).getOrElse {
-      val offsets = startingOffset match {
-        case EarliestOffsetRangeLimit    => LongOffset(getOffsetValue(asc).get)
-        case LatestOffsetRangeLimit      => LongOffset(getOffsetValue(desc).get)
-        case SpecificOffsetRangeLimit(p) => LongOffset(p)
-      }
-      metadataLog.add(0, offsets)
-      logInfo(s"Initial offsets: $offsets")
-      offsets
+  private def toBatchRange(offset: Offset, startInclusionType: JDBCOffsetFilterType): BatchOffsetRange =
+    offset match {
+      case o: JDBCOffset       => toBatchRange(o, startInclusionType)
+      case o: SerializedOffset => toBatchRange(JDBCOffset.fromJs(o.json), startInclusionType)
+      case o                   => throw new IllegalArgumentException(s"Unknown offset type: '${o.getClass.getCanonicalName}'")
     }
+
+  private def toBatchRange(offset: JDBCOffset, startInclusionType: JDBCOffsetFilterType): BatchOffsetRange = {
+    val range = offset.offset.range
+
+    if (range.start.isEmpty || range.end.isEmpty) throw new IllegalArgumentException(s"Invalid range informed: $range")
+
+    BatchOffsetRange(range.start.get, range.end.get, startInclusionType)
   }
 
-  private var currentOffsets: Option[Long] = None
-
-  override def schema: StructType = df.schema
-
-  private lazy val offsetColumnType = {
-    val t = df.col(offsetColumn).expr.dataType
-    t match {
-      case _: LongType | IntegerType | DateType | TimestampType => t
-      case _ =>
-        throw new AnalysisException(
-          s"$offsetColumn column type should be ${LongType.simpleString}, ${IntegerType.simpleString}," +
-            s"${DateType.catalogString}, or ${TimestampType.catalogString}, but " +
-            s"${df.col(offsetColumn).expr.dataType.catalogString} found."
-        )
+  private def resolveBatchRange(start: Option[Offset], end: Offset): BatchOffsetRange =
+    if (start.isEmpty) {
+      toBatchRange(end, InclusiveJDBCOffsetFilterType)
+    } else {
+      val previousBatchRange = toBatchRange(start.get, InclusiveJDBCOffsetFilterType)
+      val nextBatchRange = toBatchRange(end, InclusiveJDBCOffsetFilterType)
+      BatchOffsetRange(previousBatchRange.end, nextBatchRange.end, ExclusiveJDBCOffsetFilterType)
     }
-  }
 
-  private def getOffsetValue(sortFunc: String => Column) = {
-    val data = df.select(offsetColumn).orderBy(sortFunc(offsetColumn))
-    Try {
-      offsetColumnType match {
-        case _: TimestampType          => data.as[Timestamp].first().getTime
-        case _: IntegerType | LongType => data.as[Long].first()
-        case _: DataType               => data.as[java.sql.Date].first().getTime
-      }
-    } match {
-      case Success(value) => Some(value)
-      case Failure(ex)    => logWarning("Not found offset", ex); None
-    }
+  private def getBatchData(range: BatchOffsetRange): DataFrame = {
+    val strFilter =
+      s"$offsetColumn ${JDBCOffsetFilterType.getStartOperator(range.startInclusion)} CAST('${range.start}' AS ${offsetColumnType.sql}) and $offsetColumn <= CAST('${range.end}' AS ${offsetColumnType.sql})"
+    val filteredDf = df.where(strFilter)
+    val rdd = filteredDf.queryExecution.toRdd
+    val result = sqlContext.internalCreateDataFrame(rdd, schema, isStreaming = true)
+    logInfo(s"Offset: ${range.start} to ${range.end}")
+    result
   }
 
   override def getBatch(start: Option[Offset], end: Offset): DataFrame = {
     logInfo(s"GetBatch called with start = $start, end = $end")
+    end match {
+      case offset: SerializedOffset =>
+        logInfo(
+          msg = "Invoked with checkpointed offset. Restoring state and returning empty as this offset " +
+            "was processed by the last batch"
+        )
 
-    initialOffsets
+        currentOffset = Some(JDBCOffset.fromJs(offset.json))
 
-    if (currentOffsets.isEmpty) {
-      currentOffsets = Some(end.json().toLong)
+        logInfo(msg = s"Offsets restored to '$currentOffset'")
+
+        sqlContext.internalCreateDataFrame(
+          sqlContext.sparkContext.emptyRDD[InternalRow].setName("empty"),
+          schema,
+          isStreaming = true
+        )
+
+      case _ =>
+        val batchRange = resolveBatchRange(start, end)
+        val batchData = getBatchData(batchRange)
+        batchData
+
     }
-    if (start.isDefined && start.get == end) {
-      return sqlContext.internalCreateDataFrame(
-        sqlContext.sparkContext.emptyRDD[InternalRow].setName("empty"),
-        schema,
-        isStreaming = true
-      )
-    }
-    val startOffsets = start match {
-      case Some(prevBatchEndOffset) =>
-        prevBatchEndOffset.json().toLong + 1
-      case None =>
-        initialOffsets.offset
-    }
-
-    val endOffset: Long = end.json().toLong
-
-    val (s, e) = offsetColumnType match {
-      case _: IntegerType | LongType => (startOffsets, endOffset)
-      case _: TimestampType          => (new Timestamp(startOffsets).toString, new Timestamp(endOffset).toString)
-      case _: DataType               => (new Date(startOffsets).toString, new Date(endOffset).toString)
-    }
-
-    val strFilter =
-      s"$offsetColumn >= CAST('$s' AS ${offsetColumnType.sql}) and $offsetColumn <= CAST('$e' AS ${offsetColumnType.sql})"
-
-    val filteredDf = df.where(strFilter)
-    val rdd = filteredDf.queryExecution.toRdd
-    val result = sqlContext.internalCreateDataFrame(rdd, schema, isStreaming = true)
-    logInfo(s"Offset: ${start.toString} to ${endOffset.toString}")
-    result
-  }
-
-  override def getOffset: Option[Offset] = {
-    initialOffsets
-
-    val latest = getOffsetValue(desc)
-    val offsets = maxOffsetsPerTrigger match {
-      case None =>
-        latest.get
-    }
-
-    currentOffsets = Some(offsets)
-    logDebug(s"GetOffset: $offsets")
-    Some(LongOffset(offsets))
   }
 
   override def stop(): Unit =
     logWarning("Stop is not implemented!")
 
+  private def updateCurrentOffsets(newEndOffset: String): Unit = {
+    val newStartOffset = currentOffset.get.offset.range.end
+    val newOffsetRange = OffsetRange(newStartOffset, Some(newEndOffset))
+
+    logInfo(msg = s"Updating offsets: FROM ${currentOffset.get.offset.range} TO $newOffsetRange")
+    currentOffset = Some(JDBCOffset(OffsetWithColumn(offsetColumn, newOffsetRange)))
+  }
+
+  override def getOffset: Option[Offset] =
+    if (currentOffset.isEmpty) {
+      logInfo(msg = "No offset present, calculating it from the data.")
+      initFirstOffset()
+      logInfo(msg = s"Offsets retrieved from data: $currentOffset")
+      currentOffset
+    } else {
+      getOffsetValue(desc) match {
+        case Some(candidateNewEndOffset) if candidateNewEndOffset != currentOffset.get.offset.range.end.get =>
+          updateCurrentOffsets(newEndOffset = candidateNewEndOffset)
+          logInfo(msg = s"Next offset found: $currentOffset")
+          currentOffset
+        case _ =>
+          logDebug(msg = s"No new offset found. Previous offset: $currentOffset")
+          None
+      }
+    }
+
+  def getType(columnName: String, schema: StructType): DataType = {
+    val sqlField = schema.fields
+      .find(_.name.toLowerCase == columnName.toLowerCase)
+      .getOrElse(throw new IllegalArgumentException(s"Field not found in schema: '$columnName'"))
+
+    val currentType = sqlField.dataType
+
+    currentType match {
+      case _: DateType | TimestampType | IntegerType | LongType | DoubleType | FloatType => currentType
+      case _ =>
+        throw new AnalysisException(
+          s"'$columnName' column type should be ${LongType.simpleString}, ${IntegerType.simpleString}, " +
+            s"${DoubleType.simpleString}, ${FloatType.simpleString}," +
+            s"${DateType.catalogString}, or ${TimestampType.catalogString}, but " +
+            s"${currentType.catalogString} found."
+        )
+    }
+  }
 }
 
-object JDBCStreamSourceProvider {
+object JDBCStreamSource {
   val STARTING_OFFSETS_OPTION_KEY = "startingoffset"
   val OFFSET_COLUMN = "offsetcolumn"
-}
-
-class JDBCStreamSourceProvider extends StreamSourceProvider with DataSourceV2 with DataSourceRegister {
-
-  private lazy val df = (sqlContext: SQLContext, parameters: Map[String, String]) => {
-    sqlContext.sparkSession.read
-      .format("jdbc")
-      .options(parameters)
-      .load
-  }
-
-  override def shortName(): String = "jdbc-streaming"
-
-  override def sourceSchema(
-    sqlContext: SQLContext,
-    schema: Option[StructType],
-    providerName: String,
-    parameters: Map[String, String]
-  ): (String, StructType) =
-    (shortName(), df(sqlContext, parameters).schema)
-
-  override def createSource(
-    sqlContext: SQLContext,
-    metadataPath: String,
-    schema: Option[StructType],
-    providerName: String,
-    parameters: Map[String, String]
-  ): Source = {
-    val caseInsensitiveParameters = CaseInsensitiveMap(parameters)
-    new JDBCStreamSource(sqlContext, providerName, caseInsensitiveParameters, metadataPath, df(sqlContext, parameters))
-  }
 }
