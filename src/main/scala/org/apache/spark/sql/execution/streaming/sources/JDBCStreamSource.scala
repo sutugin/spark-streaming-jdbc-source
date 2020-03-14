@@ -5,7 +5,7 @@ import java.sql.{Date, Timestamp}
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.execution.streaming._
-import org.apache.spark.sql.execution.streaming.sources.offset.{BatchOffsetRange, EarliestOffsetRangeLimit, ExclusiveJDBCOffsetFilterType, InclusiveJDBCOffsetFilterType, JDBCOffset, JDBCOffsetFilterType, JDBCOffsetRangeLimit, LatestOffsetRangeLimit, OffsetWithColumn, OffsetRange, SpecificOffsetRangeLimit}
+import org.apache.spark.sql.execution.streaming.sources.offset.{BatchOffsetRange, EarliestOffsetRangeLimit, ExclusiveJDBCOffsetFilterType, InclusiveJDBCOffsetFilterType, JDBCOffset, JDBCOffsetFilterType, JDBCOffsetRangeLimit, LatestOffsetRangeLimit, OffsetRange, SpecificOffsetRangeLimit}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{AnalysisException, Column, DataFrame, SQLContext}
@@ -62,7 +62,7 @@ class JDBCStreamSource(
     val end = SpecificOffsetRangeLimit(getOffsetValue(desc).get)
 
     val offsetRange = OffsetRange(Some(start.toString), Some(end.toString))
-    currentOffset = Some(JDBCOffset(OffsetWithColumn(offsetColumn, offsetRange)))
+    currentOffset = Some(JDBCOffset(offsetColumn, offsetRange))
   }
 
   private val startingOffset = {
@@ -91,12 +91,12 @@ class JDBCStreamSource(
   private def toBatchRange(offset: Offset, startInclusionType: JDBCOffsetFilterType): BatchOffsetRange =
     offset match {
       case o: JDBCOffset       => toBatchRange(o, startInclusionType)
-      case o: SerializedOffset => toBatchRange(JDBCOffset.fromJs(o.json), startInclusionType)
+      case o: SerializedOffset => toBatchRange(JDBCOffset.fromJson(o.json), startInclusionType)
       case o                   => throw new IllegalArgumentException(s"Unknown offset type: '${o.getClass.getCanonicalName}'")
     }
 
   private def toBatchRange(offset: JDBCOffset, startInclusionType: JDBCOffsetFilterType): BatchOffsetRange = {
-    val range = offset.offset.range
+    val range = offset.range
 
     if (range.start.isEmpty || range.end.isEmpty) throw new IllegalArgumentException(s"Invalid range informed: $range")
 
@@ -131,7 +131,7 @@ class JDBCStreamSource(
             "was processed by the last batch"
         )
 
-        currentOffset = Some(JDBCOffset.fromJs(offset.json))
+        currentOffset = Some(JDBCOffset.fromJson(offset.json))
 
         logInfo(msg = s"Offsets restored to '$currentOffset'")
 
@@ -153,11 +153,11 @@ class JDBCStreamSource(
     logWarning("Stop is not implemented!")
 
   private def updateCurrentOffsets(newEndOffset: String): Unit = {
-    val newStartOffset = currentOffset.get.offset.range.end
+    val newStartOffset = currentOffset.get.range.end
     val newOffsetRange = OffsetRange(newStartOffset, Some(newEndOffset))
 
-    logInfo(msg = s"Updating offsets: FROM ${currentOffset.get.offset.range} TO $newOffsetRange")
-    currentOffset = Some(JDBCOffset(OffsetWithColumn(offsetColumn, newOffsetRange)))
+    logInfo(msg = s"Updating offsets: FROM ${currentOffset.get.range} TO $newOffsetRange")
+    currentOffset = Some(JDBCOffset(offsetColumn, newOffsetRange))
   }
 
   override def getOffset: Option[Offset] =
@@ -168,7 +168,7 @@ class JDBCStreamSource(
       currentOffset
     } else {
       getOffsetValue(desc) match {
-        case Some(candidateNewEndOffset) if candidateNewEndOffset != currentOffset.get.offset.range.end.get =>
+        case Some(candidateNewEndOffset) if candidateNewEndOffset != currentOffset.get.range.end.get =>
           updateCurrentOffsets(newEndOffset = candidateNewEndOffset)
           logInfo(msg = s"Next offset found: $currentOffset")
           currentOffset

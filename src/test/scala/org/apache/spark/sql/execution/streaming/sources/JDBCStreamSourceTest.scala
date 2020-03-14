@@ -1,11 +1,10 @@
 package org.apache.spark.sql.execution.streaming.sources
 
 import java.sql.{Date, Timestamp}
-
 import com.holdenkarau.spark.testing.{DataFrameSuiteBase, SharedSparkContext}
+import org.apache.spark.sql.functions._
 import org.apache.spark.sql.{DataFrame, SaveMode, SparkSession}
 import org.scalatest.{FlatSpec, Matchers}
-import org.apache.spark.sql.functions._
 
 class JDBCStreamSourceTest
     extends FlatSpec
@@ -16,7 +15,7 @@ class JDBCStreamSourceTest
 
   override implicit lazy val spark: SparkSession = SparkSession
     .builder()
-    .master("local")
+    .master("local[1]")
     .appName("spark session")
     .getOrCreate()
 
@@ -186,5 +185,63 @@ class JDBCStreamSourceTest
     val expectedAfter = expectedFirstBatch.union(updated).orderBy(offsetColumn)
 
     assertDataFrameEquals(expectedAfter, actualAfter)
+  }
+
+  it should "restoring from checkpoint and continue job" in {
+    val offsetColumn = "id"
+    val outputTableName = s"tbl${java.util.UUID.randomUUID.toString.replace('-', 'n')}"
+    val firstBatch = inputData.toDF(columns: _*).orderBy(offsetColumn)
+    val jdbc = jdbcDefaultParams(outputTableName, offsetColumn)
+    writeToJDBC(jdbc, firstBatch, SaveMode.Append)
+    val tmpOutput = s"${createLocalTempDir("outpute")}"
+    val tmpCheckpoint: String = s"${createLocalTempDir("checkopoint")}"
+    val q = spark.readStream
+      .format(fmt)
+      .options(jdbc)
+      .load()
+      .writeStream
+      .format(source = "json")
+      .queryName(outputTableName)
+      .outputMode("append")
+      .option("checkpointLocation", tmpCheckpoint)
+      .start(tmpOutput)
+    q.processAllAvailable()
+
+    firstBatch.orderBy(desc(offsetColumn)).createOrReplaceTempView("firstBatchView")
+    val expectedFirstBatch = spark.sql("select * from firstBatchView").orderBy(offsetColumn)
+    val actualBefore = spark.read.schema(firstBatch.schema).json(tmpOutput)
+    assertDataFrameEquals(expectedFirstBatch, actualBefore)
+
+    spark.stop()
+
+    val sp: SparkSession = SparkSession
+      .builder()
+      .master("local[1]")
+      .appName("spark session")
+      .getOrCreate()
+    sp.sparkContext.setLogLevel("WARN")
+    import sp.implicits._
+    val updated =
+      Seq((Some(6), "666", Timestamp.valueOf("2017-03-15 03:04:00"), Date.valueOf("2019-01-06"))).toDF(columns: _*)
+    val withUpdated = inputData.toDF(columns: _*).union(updated)
+
+    writeToJDBC(jdbc, withUpdated, SaveMode.Overwrite)
+    val q2 = sp.readStream
+      .format(fmt)
+      .options(jdbc)
+      .load()
+      .writeStream
+      .format(source = "json")
+      .queryName(outputTableName)
+      .outputMode("append")
+      .option("checkpointLocation", tmpCheckpoint)
+      .start(tmpOutput)
+    q2.processAllAvailable()
+
+    val actualAfter = sp.read.format("json").schema(updated.schema).load(tmpOutput).orderBy(offsetColumn)
+    val expectedAfter = inputData.toDF(columns: _*).union(updated).orderBy(offsetColumn)
+
+    assertDataFrameEquals(expectedAfter, actualAfter)
+
   }
 }

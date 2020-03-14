@@ -13,34 +13,30 @@ case class OffsetRange(start: Option[String], end: Option[String]) {
     s"start = '$start', end = '$end'"
 }
 
-case class OffsetWithColumn(columnName: String, range: OffsetRange) {
+case class JDBCOffset(columnName: String, range: OffsetRange) extends Offset {
   override def toString: String =
     s"Offset column = '$columnName', Offset range = '$range'"
-}
-
-case class JDBCOffset(offset: OffsetWithColumn) extends Offset {
-
   override def json(): String =
-    JDBCOffset.mapper.writeValueAsString(offset)
-
-  override def toString: String =
-    offset.toString
-
-  def fromJson[T](json: String)(implicit m: Manifest[T]): T =
-    JDBCOffset.mapper.readValue[T](json)
+    JDBCOffset.toJson(this).toString
 }
 
 case object JDBCOffset {
-
-  lazy val mapper  = {
-    val mapper = new ObjectMapper() with ScalaObjectMapper
-    mapper.registerModule(DefaultScalaModule)
-    mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-    mapper
+  private val jsonMapper = {
+    val m = new ObjectMapper() with ScalaObjectMapper
+    m.registerModule(DefaultScalaModule)
+    m.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true)
+    m
   }
 
-  def toJson(offset: JDBCOffset): String = mapper.writeValueAsString(offset)
+  def toJson(value: Any): String =
+    jsonMapper.writeValueAsString(value)
 
-  def fromJs(json: String): JDBCOffset =
-    mapper.readValue[JDBCOffset](json)
+  private def fromJson[T](json: String)(implicit m: Manifest[T]): T =
+    jsonMapper.readValue[T](json)
+
+  def fromJson(json: String): JDBCOffset = {
+    println(json)
+    val foo = fromJson[JDBCOffset](json)
+    foo
+  }
 }
