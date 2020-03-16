@@ -1,14 +1,12 @@
 package org.apache.spark.sql.execution.streaming.sources
 
-import java.sql.{Date, Timestamp}
-
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.execution.streaming._
-import org.apache.spark.sql.execution.streaming.sources.offset.{BatchOffsetRange, EarliestOffsetRangeLimit, ExclusiveJDBCOffsetFilterType, InclusiveJDBCOffsetFilterType, JDBCOffset, JDBCOffsetFilterType, JDBCOffsetRangeLimit, LatestOffsetRangeLimit, OffsetRange, SpecificOffsetRangeLimit}
+import org.apache.spark.sql.execution.streaming.sources.offset._
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.{AnalysisException, Column, DataFrame, SQLContext}
+import org.apache.spark.sql.{Column, DataFrame, SQLContext}
 
 import scala.util.{Failure, Success, Try}
 
@@ -37,18 +35,8 @@ class JDBCStreamSource(
   private var currentOffset: Option[JDBCOffset] = None
 
   private def getOffsetValue(sortFunc: String => Column) = {
-    val data = df.select(offsetColumn).orderBy(sortFunc(offsetColumn))
-    Try {
-      offsetColumnType match {
-        case _: TimestampType => data.as[Timestamp].first()
-        case _: LongType      => data.as[Long].first()
-        case _: IntegerType   => data.as[Int].first()
-        case _: FloatType     => data.as[Float].first()
-        case _: DoubleType    => data.as[Double].first()
-        case _: DataType      => data.as[java.sql.Date].first()
-      }
-    } match {
-      case Success(value) => Some(value.toString)
+    Try {df.select(offsetColumn).orderBy(sortFunc(offsetColumn)).as[String].first} match {
+      case Success(value) => Some(value)
       case Failure(ex)    => logWarning(s"Not found offset ${ex.getStackTrace.mkString("\n")}"); None
     }
   }
@@ -74,15 +62,7 @@ class JDBCStreamSource(
       off match {
         case JDBCOffsetRangeLimit.EARLIEST => EarliestOffsetRangeLimit
         case JDBCOffsetRangeLimit.LATEST   => LatestOffsetRangeLimit
-        case v =>
-          offsetColumnType match {
-            case _: LongType      => SpecificOffsetRangeLimit(v.toLong)
-            case _: IntegerType   => SpecificOffsetRangeLimit(v.toInt)
-            case _: FloatType     => SpecificOffsetRangeLimit(v.toFloat)
-            case _: DoubleType    => SpecificOffsetRangeLimit(v.toDouble)
-            case _: TimestampType => SpecificOffsetRangeLimit(Timestamp.valueOf(v).getTime)
-            case _: DataType      => SpecificOffsetRangeLimit(Date.valueOf(v).getTime)
-          }
+        case v => SpecificOffsetRangeLimit(v)
       }
 
     }
@@ -178,23 +158,11 @@ class JDBCStreamSource(
       }
     }
 
-  def getType(columnName: String, schema: StructType): DataType = {
+  private def getType(columnName: String, schema: StructType): DataType = {
     val sqlField = schema.fields
       .find(_.name.toLowerCase == columnName.toLowerCase)
       .getOrElse(throw new IllegalArgumentException(s"Field not found in schema: '$columnName'"))
-
-    val currentType = sqlField.dataType
-
-    currentType match {
-      case _: DateType | TimestampType | IntegerType | LongType | DoubleType | FloatType => currentType
-      case _ =>
-        throw new AnalysisException(
-          s"'$columnName' column type should be ${LongType.simpleString}, ${IntegerType.simpleString}, " +
-            s"${DoubleType.simpleString}, ${FloatType.simpleString}," +
-            s"${DateType.catalogString}, or ${TimestampType.catalogString}, but " +
-            s"${currentType.catalogString} found."
-        )
-    }
+    sqlField.dataType
   }
 }
 

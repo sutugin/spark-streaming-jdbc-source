@@ -52,15 +52,9 @@ query.awaitTermination()
 All JDBC connection parameters are set as in non-streaming reading (https://spark.apache.org/docs/latest/sql-data-sources-jdbc.html),
 except for the following:
 
-###### ``offsetColumn`` : Required field, name of the column by which changes will be tracked. The following column types are supported:
-- DateType 
-- TimestampType
-- IntegerType 
-- LongType 
-- DoubleType 
-- FloatType
+#### ``offsetColumn`` : Required field, name of the column by which changes will be tracked. 
 
-###### ``startingoffset`` : The start point when a query is started, either ``"earliest"`` (default value) which is from the min offsetColumn value, ``"latest"`` which is just from the max offsetColumn value, or a string specifying a starting offset:
+#### ``startingoffset`` : The start point when a query is started, either ``"earliest"`` (default value) which is from the min offsetColumn value, ``"latest"`` which is just from the max offsetColumn value, or a string specifying a starting offset:
 - Numeric  ``"0"`` or ``"1.4"``
 - TimestampType ``"2019-01-30 00:10:00"``
 - DataType ``"2019-03-20""``
