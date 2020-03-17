@@ -34,12 +34,11 @@ class JDBCStreamSource(
 
   private var currentOffset: Option[JDBCOffset] = None
 
-  private def getOffsetValue(sortFunc: String => Column) = {
-    Try {df.select(offsetColumn).orderBy(sortFunc(offsetColumn)).as[String].first} match {
+  private def getOffsetValue(sortFunc: String => Column) =
+    Try { df.select(offsetColumn).orderBy(sortFunc(offsetColumn)).as[String].first } match {
       case Success(value) => Some(value)
       case Failure(ex)    => logWarning(s"Not found offset ${ex.getStackTrace.mkString("\n")}"); None
     }
-  }
 
   private def initFirstOffset(): Unit = {
     val start = startingOffset match {
@@ -54,17 +53,12 @@ class JDBCStreamSource(
   }
 
   private val startingOffset = {
-    val s = parameters.get(STARTING_OFFSETS_OPTION_KEY)
-    if (s.isEmpty)
-      EarliestOffsetRangeLimit
-    else {
-      val off = s.get
-      off match {
-        case JDBCOffsetRangeLimit.EARLIEST => EarliestOffsetRangeLimit
-        case JDBCOffsetRangeLimit.LATEST   => LatestOffsetRangeLimit
-        case v => SpecificOffsetRangeLimit(v)
-      }
-
+    val startingOffset = parameters.get(STARTING_OFFSETS_OPTION_KEY)
+    val offset = startingOffset.getOrElse(EarliestOffsetRangeLimit.toString)
+    offset match {
+      case EarliestOffsetRangeLimit.toString => EarliestOffsetRangeLimit
+      case LatestOffsetRangeLimit.toString   => LatestOffsetRangeLimit
+      case v                                 => SpecificOffsetRangeLimit(v)
     }
   }
 
@@ -77,9 +71,7 @@ class JDBCStreamSource(
 
   private def toBatchRange(offset: JDBCOffset, startInclusionType: JDBCOffsetFilterType): BatchOffsetRange = {
     val range = offset.range
-
     if (range.start.isEmpty || range.end.isEmpty) throw new IllegalArgumentException(s"Invalid range informed: $range")
-
     BatchOffsetRange(range.start.get, range.end.get, startInclusionType)
   }
 
@@ -98,22 +90,21 @@ class JDBCStreamSource(
     val filteredDf = df.where(strFilter)
     val rdd = filteredDf.queryExecution.toRdd
     val result = sqlContext.internalCreateDataFrame(rdd, schema, isStreaming = true)
-    logInfo(s"Offset: ${range.start} to ${range.end}")
+    logInfo(s"Offset: '${range.start}' to '${range.end}'")
     result
   }
 
   override def getBatch(start: Option[Offset], end: Offset): DataFrame = {
-    logInfo(s"GetBatch called with start = $start, end = $end")
+    logInfo(s"GetBatch  start = '$start', end = '$end'")
     end match {
       case offset: SerializedOffset =>
         logInfo(
-          msg = "Invoked with checkpointed offset. Restoring state and returning empty as this offset " +
+          "Restoring state and returning empty as this offset " +
             "was processed by the last batch"
         )
 
         currentOffset = Some(JDBCOffset.fromJson(offset.json))
-
-        logInfo(msg = s"Offsets restored to '$currentOffset'")
+        logInfo(s"Offsets restored to '$currentOffset'")
 
         sqlContext.internalCreateDataFrame(
           sqlContext.sparkContext.emptyRDD[InternalRow].setName("empty"),
@@ -135,25 +126,24 @@ class JDBCStreamSource(
   private def updateCurrentOffsets(newEndOffset: String): Unit = {
     val newStartOffset = currentOffset.get.range.end
     val newOffsetRange = OffsetRange(newStartOffset, Some(newEndOffset))
-
-    logInfo(msg = s"Updating offsets: FROM ${currentOffset.get.range} TO $newOffsetRange")
+    logInfo(s"Updating offsets: FROM '${currentOffset.get.range}' TO '$newOffsetRange'")
     currentOffset = Some(JDBCOffset(offsetColumn, newOffsetRange))
   }
 
   override def getOffset: Option[Offset] =
     if (currentOffset.isEmpty) {
-      logInfo(msg = "No offset present, calculating it from the data.")
+      logInfo("No offset, will try to get it from the source.")
       initFirstOffset()
-      logInfo(msg = s"Offsets retrieved from data: $currentOffset")
+      logInfo(s"Offsets retrieved from data: '$currentOffset'.")
       currentOffset
     } else {
       getOffsetValue(desc) match {
         case Some(candidateNewEndOffset) if candidateNewEndOffset != currentOffset.get.range.end.get =>
           updateCurrentOffsets(newEndOffset = candidateNewEndOffset)
-          logInfo(msg = s"Next offset found: $currentOffset")
+          logInfo(s"New offset found: '$currentOffset'.")
           currentOffset
         case _ =>
-          logDebug(msg = s"No new offset found. Previous offset: $currentOffset")
+          logDebug(s"No new offset found. Previous offset: $currentOffset")
           None
       }
     }
@@ -161,7 +151,7 @@ class JDBCStreamSource(
   private def getType(columnName: String, schema: StructType): DataType = {
     val sqlField = schema.fields
       .find(_.name.toLowerCase == columnName.toLowerCase)
-      .getOrElse(throw new IllegalArgumentException(s"Field not found in schema: '$columnName'"))
+      .getOrElse(throw new IllegalArgumentException(s"Column not found in schema: '$columnName'"))
     sqlField.dataType
   }
 }

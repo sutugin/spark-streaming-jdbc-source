@@ -20,9 +20,12 @@ lazy val root = (project in file("."))
       }
     },
     libraryDependencies ++= Seq(
-      "org.apache.spark" %% "spark-core" % sparkVersion.value % "provided",
-      "org.apache.spark" %% "spark-sql" % sparkVersion.value % "provided"
-    ) ++ testDependencies
+      "org.apache.spark" %% "spark-core" % sparkVersion.value % Provided,
+      "org.apache.spark" %% "spark-sql" % sparkVersion.value % Provided,
+      "org.scalatest" %% "scalatest" % "3.0.8" % Test,
+      "com.h2database" % "h2" % "1.4.196" % Test,
+      "com.holdenkarau" %% "spark-testing-base" % "2.3.2_0.12.0" % Test
+    )
   )
 
 lazy val scalacOptionsSettings = Seq(
@@ -62,7 +65,7 @@ lazy val commonSettings = Seq(
     } else if (sparkVersion.value >= "2.0.0") {
       defaultScalaVersion
     } else {
-      defaultScalaVersion
+      throw new IllegalArgumentException(s"spark version must be more than 2.0.0")
     }
   },
   scalacOptions ++= scalacOptionsSettings,
@@ -89,16 +92,6 @@ lazy val commonSettings = Seq(
   },
   logBuffered in Test := false,
   assemblyJarName in assembly := s"${name.value}-${version.value}.jar"
-
-  //  scalastyleSources in Compile ++= {unmanagedSourceDirectories in Compile}.value,
-  //  scalastyleSources in Test ++= {unmanagedSourceDirectories in Test}.value,
-)
-
-// test libraries
-lazy val testDependencies = Seq(
-  "org.scalatest" %% "scalatest" % "3.0.8" % "provided",
-  "com.h2database" % "h2" % "1.4.196" % "test",
-  "com.holdenkarau" %% "spark-testing-base" % "2.3.2_0.12.0" % "test"
 )
 
 // publish settings

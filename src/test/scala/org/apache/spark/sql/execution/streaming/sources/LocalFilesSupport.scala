@@ -10,7 +10,7 @@ trait LocalFilesSupport extends BeforeAndAfterAll {
 
   private var tempDirs = List.empty[Path]
 
-  def createLocalTempDir(prefix: String) = {
+  def createLocalTempDir(prefix: String): String = {
     val newTempDir = Files.createTempDirectory(Paths.get(System.getProperty("java.io.tmpdir")), prefix)
     tempDirs = tempDirs :+ newTempDir
 

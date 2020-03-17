@@ -17,26 +17,22 @@ case class JDBCOffset(columnName: String, range: OffsetRange) extends Offset {
   override def toString: String =
     s"Offset column = '$columnName', Offset range = '$range'"
   override def json(): String =
-    JDBCOffset.toJson(this).toString
+    JDBCOffset.toJson(JDBCOffset(columnName, range)).toString
 }
 
 case object JDBCOffset {
   private val jsonMapper = {
-    val m = new ObjectMapper() with ScalaObjectMapper
-    m.registerModule(DefaultScalaModule)
-    m.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true)
-    m
+    val mapper = new ObjectMapper() with ScalaObjectMapper
+    mapper.registerModule(DefaultScalaModule)
+    mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true)
+    mapper
   }
 
-  def toJson(value: Any): String =
+  def toJson(value: JDBCOffset): String =
     jsonMapper.writeValueAsString(value)
 
   private def fromJson[T](json: String)(implicit m: Manifest[T]): T =
     jsonMapper.readValue[T](json)
 
-  def fromJson(json: String): JDBCOffset = {
-    println(json)
-    val foo = fromJson[JDBCOffset](json)
-    foo
-  }
+  def fromJson(json: String): JDBCOffset = fromJson[JDBCOffset](json)
 }
