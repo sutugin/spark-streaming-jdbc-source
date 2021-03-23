@@ -4,10 +4,9 @@ import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.util.CaseInsensitiveMap
 import org.apache.spark.sql.execution.streaming.Source
 import org.apache.spark.sql.sources.{DataSourceRegister, StreamSourceProvider}
-import org.apache.spark.sql.sources.v2.DataSourceV2
 import org.apache.spark.sql.types.StructType
 
-class JDBCStreamSourceProvider extends StreamSourceProvider with DataSourceV2 with DataSourceRegister {
+class JDBCStreamSourceProvider extends StreamSourceProvider with DataSourceRegister {
 
   private lazy val df = (sqlContext: SQLContext, parameters: Map[String, String]) => {
     sqlContext.sparkSession.read
@@ -37,6 +36,6 @@ class JDBCStreamSourceProvider extends StreamSourceProvider with DataSourceV2 wi
     parameters: Map[String, String]
   ): Source = {
     val caseInsensitiveParameters = CaseInsensitiveMap(parameters)
-    new JDBCStreamSource(sqlContext, providerName, caseInsensitiveParameters, metadataPath, df(sqlContext, parameters))
+    new JDBCStreamSource(sqlContext, caseInsensitiveParameters, df(sqlContext, parameters))
   }
 }

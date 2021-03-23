@@ -1,30 +1,24 @@
-lazy val defaultScalaVersion = "2.11.12"
-lazy val defaultSparkVersion = "2.3.2"
+lazy val defaultSparkVersion = "2.3.0"
 lazy val releaseVersion = settingKey[String]("Global assembly version")
 lazy val sparkVersion = settingKey[String]("Spark version")
 lazy val jdbcStreamingSourceVersion =
   settingKey[String]("Spark streaming jdbc source version without Spark version part")
+
+lazy val defaultScalaVersion = if (defaultSparkVersion >= "2.4.0") "2.12.10" else "2.11.12"
+
+lazy val sparkFastTestsVersion = if (defaultSparkVersion >= "3.0.0") "1.0.0" else "0.23.0"
 
 lazy val root = (project in file("."))
   .settings(
     name := "spark-streaming-jdbc-source",
     commonSettings,
     publishSettings,
-    crossScalaVersions := {
-      if (sparkVersion.value >= "2.4.0") {
-        Seq("2.12.8")
-      } else if (sparkVersion.value >= "2.3.0") {
-        Seq("2.11.12")
-      } else {
-        Seq("2.10.6", "2.11.11")
-      }
-    },
     libraryDependencies ++= Seq(
       "org.apache.spark" %% "spark-core" % sparkVersion.value % Provided,
       "org.apache.spark" %% "spark-sql" % sparkVersion.value % Provided,
       "org.scalatest" %% "scalatest" % "3.0.8" % Test,
       "com.h2database" % "h2" % "1.4.196" % Test,
-      "com.holdenkarau" %% "spark-testing-base" % "2.3.2_0.12.0" % Test
+      "com.github.mrpowers" %% "spark-fast-tests" % sparkFastTestsVersion % Test,
     )
   )
 
@@ -59,23 +53,9 @@ lazy val commonSettings = Seq(
   sparkVersion := System.getProperty("sparkVersion", defaultSparkVersion),
   releaseVersion := "0.0.1",
   version := sparkVersion.value + "_" + releaseVersion.value,
-  scalaVersion := {
-    if (sparkVersion.value >= "2.4.0") {
-      "2.12.8"
-    } else if (sparkVersion.value >= "2.0.0") {
-      defaultScalaVersion
-    } else {
-      throw new IllegalArgumentException(s"spark version must be more than 2.0.0")
-    }
-  },
+  scalaVersion := defaultScalaVersion,
   scalacOptions ++= scalacOptionsSettings,
-  javacOptions ++= {
-    if (sparkVersion.value >= "2.1.1") {
-      Seq("-source", "1.8", "-target", "1.8")
-    } else {
-      Seq("-source", "1.7", "-target", "1.7")
-    }
-  },
+  javacOptions ++= {Seq("-source", "1.8", "-target", "1.8")},
   parallelExecution in Test := false,
   fork := true,
   resolvers ++= Seq(

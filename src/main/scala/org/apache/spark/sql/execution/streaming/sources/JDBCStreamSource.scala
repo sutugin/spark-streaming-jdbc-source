@@ -12,9 +12,7 @@ import scala.util.{Failure, Success, Try}
 
 class JDBCStreamSource(
   sqlContext: SQLContext,
-  providerName: String,
   parameters: Map[String, String],
-  metadataPath: String,
   df: DataFrame
 ) extends Source
     with Logging {
@@ -89,6 +87,7 @@ class JDBCStreamSource(
       s"$offsetColumn ${JDBCOffsetFilterType.getStartOperator(range.startInclusion)} CAST('${range.start}' AS ${offsetColumnType.sql}) and $offsetColumn <= CAST('${range.end}' AS ${offsetColumnType.sql})"
     val filteredDf = df.where(strFilter)
     val rdd = filteredDf.queryExecution.toRdd
+
     val result = sqlContext.internalCreateDataFrame(rdd, schema, isStreaming = true)
     logInfo(s"Offset: '${range.start}' to '${range.end}'")
     result
