@@ -6,6 +6,7 @@ A library for querying JDBC data with Apache Spark Structured Streaming, for Spa
 
 - ### Build from Source
 In the build.sbt file specify the desired version of spark(2.3 and older) 
+
 ``
 sbt "set test in assembly := {}" clean assembly
 ``
