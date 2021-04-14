@@ -3,7 +3,7 @@ package org.apache.spark.sql.execution.streaming.sources
 import java.sql.{Date, Timestamp}
 import com.github.mrpowers.spark.fast.tests.DatasetComparer
 import org.apache.spark.sql.execution.streaming.sources.offset.{JDBCOffset, OffsetRange}
-import org.apache.spark.sql.{DataFrame, SaveMode, SparkSession}
+import org.apache.spark.sql.{DataFrame, Row, SaveMode, SparkSession}
 import org.scalatest.{FlatSpec, Matchers}
 import org.apache.spark.sql.streaming.StreamingQueryListener
 import org.apache.spark.sql.streaming.StreamingQueryListener.{QueryProgressEvent, QueryStartedEvent, QueryTerminatedEvent}
@@ -254,5 +254,25 @@ class JDBCStreamSourceTest
     val expectedOffsetTwo = Some(JDBCOffset(offsetColumn, OffsetRange(Some("5"), Some("7"))))
 
     expectedOffsetTwo shouldBe offsetFromCheckpointTwo
+  }
+
+  it should "work with empty table" in {
+    import spark.implicits._
+    val offsetColumn = "id"
+    val jdbcTableName = s"tbl${java.util.UUID.randomUUID.toString.replace('-', 'n')}"
+    val expected = inputData.toDF(columns: _*)
+    val schema = expected.schema
+    val emptyDf = spark.createDataFrame(spark.sparkContext.emptyRDD[Row], schema)
+    val jdbc = jdbcDefaultParams(jdbcTableName, offsetColumn)
+    writeToJDBC(jdbc, emptyDf, SaveMode.Append)
+
+    val tmpCheckpoint = s"${createLocalTempDir("checkopoint")}"
+    val tmpOutputDir = s"${createLocalTempDir("output")}"
+    saveStreamingDataToTempDir(jdbc, tmpCheckpoint, tmpOutputDir, spark)
+    writeToJDBC(jdbc, expected, SaveMode.Append)
+    saveStreamingDataToTempDir(jdbc, tmpCheckpoint, tmpOutputDir, spark, "query2")
+
+    val actual = spark.read.schema(schema).json(tmpOutputDir)
+    assertSmallDatasetEquality(actualDS = actual, expectedDS = expected, orderedComparison = false)
   }
 }

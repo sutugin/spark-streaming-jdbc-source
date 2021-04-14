@@ -132,9 +132,10 @@ class JDBCStreamSource(
   override def getOffset: Option[Offset] =
     if (currentOffset.isEmpty) {
       logInfo("No offset, will try to get it from the source.")
-      initFirstOffset()
-      logInfo(s"Offsets retrieved from data: '$currentOffset'.")
-      currentOffset
+      Try(initFirstOffset()) match {
+        case Success(_) => logInfo(s"Offsets retrieved from data: '$currentOffset'."); currentOffset
+        case Failure(ex) => logWarning(s"Not found offset in source table${ex.getStackTrace.mkString("\n")}"); None
+      }
     } else {
       getOffsetValue(desc) match {
         case Some(candidateNewEndOffset) if candidateNewEndOffset != currentOffset.get.range.end.get =>

@@ -1,4 +1,4 @@
-lazy val defaultSparkVersion = "2.3.0"
+lazy val defaultSparkVersion = "3.0.1"
 lazy val releaseVersion = settingKey[String]("Global assembly version")
 lazy val sparkVersion = settingKey[String]("Spark version")
 lazy val jdbcStreamingSourceVersion =
