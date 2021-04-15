@@ -100,6 +100,8 @@ class JDBCStreamSourceTest
     saveStreamingDataToTempDir(jdbc, tmpCheckpoint, tmpOutputDir, spark)
 
     val actual = spark.read.schema(expected.schema).json(tmpOutputDir)
+    actual.show(false)
+    expected.show(false)
 
     assertSmallDatasetEquality(actualDS = actual, expectedDS = expected, orderedComparison = false)
   }
@@ -274,5 +276,21 @@ class JDBCStreamSourceTest
 
     val actual = spark.read.schema(schema).json(tmpOutputDir)
     assertSmallDatasetEquality(actualDS = actual, expectedDS = expected, orderedComparison = false)
+  }
+
+  it should "work with custom dbtable" in {
+    import spark.implicits._
+    val offsetColumn = "dt"
+    val jdbcTableName = s"tbl${java.util.UUID.randomUUID.toString.replace('-', 'n')}"
+    val expected = inputData.toDF(columns: _*)
+    val jdbc = jdbcDefaultParams(jdbcTableName, offsetColumn)
+    writeToJDBC(jdbc, expected, SaveMode.Append)
+    val jdbc2 = jdbcDefaultParams(s"(select * from $jdbcTableName) t", offsetColumn)
+    val tmpCheckpoint = s"${createLocalTempDir("checkopoint")}"
+    val tmpOutputDir = s"${createLocalTempDir("output")}"
+    saveStreamingDataToTempDir(jdbc2, tmpCheckpoint, tmpOutputDir, spark)
+    val actual = spark.read.schema(expected.schema).json(tmpOutputDir)
+    assertSmallDatasetEquality(actualDS = actual, expectedDS = expected, orderedComparison = false)
+
   }
 }

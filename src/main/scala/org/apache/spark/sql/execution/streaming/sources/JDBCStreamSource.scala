@@ -4,11 +4,10 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.execution.streaming._
 import org.apache.spark.sql.execution.streaming.sources.offset._
-import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.{Column, DataFrame, SQLContext}
+import org.apache.spark.sql.{DataFrame, SQLContext}
 
-import scala.util.{Failure, Success, Try}
+//import scala.util.{Failure, Success, Try}
 
 class JDBCStreamSource(
   sqlContext: SQLContext,
@@ -18,7 +17,6 @@ class JDBCStreamSource(
     with Logging {
 
   import JDBCStreamSource._
-  import sqlContext.implicits._
 
   // ToDo: implement
   // private val maxOffsetsPerTrigger = None
@@ -32,22 +30,31 @@ class JDBCStreamSource(
 
   private var currentOffset: Option[JDBCOffset] = None
 
-  private def getOffsetValue(sortFunc: String => Column) =
-    Try { df.select(offsetColumn).orderBy(sortFunc(offsetColumn)).as[String].first } match {
-      case Success(value) => Some(value)
-      case Failure(ex)    => logWarning(s"Not found offset ${ex.getStackTrace.mkString("\n")}"); None
-    }
+  private def getOffsetValues: (Option[String], Option[String]) = {
+    val tableKey = "dbtable"
+    val dbTable = parameters(tableKey)
+    val minMaxQuery = s"(select max($offsetColumn) as max_$offsetColumn, min($offsetColumn) as min_$offsetColumn from $dbTable) minMaxTable"
+    val jdbOps = parameters - tableKey + (tableKey -> minMaxQuery)
+    val mm = df.sparkSession.read.format("jdbc").options(jdbOps).load().collect()(0)
+    val min = Option(mm.get(1)).map(x => x.toString)
+    val max = Option(mm.get(0)).map(x => x.toString)
+    (min, max)
+  }
+
+
 
   private def initFirstOffset(): Unit = {
+    val (min, max) = getOffsetValues
     val start = startingOffset match {
-      case EarliestOffsetRangeLimit    => SpecificOffsetRangeLimit(getOffsetValue(asc).get)
-      case LatestOffsetRangeLimit      => SpecificOffsetRangeLimit(getOffsetValue(desc).get)
-      case SpecificOffsetRangeLimit(p) => SpecificOffsetRangeLimit(p)
+      case EarliestOffsetRangeLimit    => min.map(x => SpecificOffsetRangeLimit(x).toString)
+      case LatestOffsetRangeLimit      => max.map(x => SpecificOffsetRangeLimit(x).toString)
+      case SpecificOffsetRangeLimit(p) => Some(SpecificOffsetRangeLimit(p).toString)
     }
-    val end = SpecificOffsetRangeLimit(getOffsetValue(desc).get)
+    val end = max.map(x => SpecificOffsetRangeLimit(x).toString)
 
-    val offsetRange = OffsetRange(Some(start.toString), Some(end.toString))
-    currentOffset = Some(JDBCOffset(offsetColumn, offsetRange))
+    if (start.nonEmpty && end.nonEmpty){
+      currentOffset = Some(JDBCOffset(offsetColumn, OffsetRange(start, end)))
+    }
   }
 
   private val startingOffset = {
@@ -112,10 +119,17 @@ class JDBCStreamSource(
         )
 
       case _ =>
-        val batchRange = resolveBatchRange(start, end)
-        val batchData = getBatchData(batchRange)
-        batchData
-
+        if (end.asInstanceOf[JDBCOffset].range.end.isEmpty){
+          sqlContext.internalCreateDataFrame(
+            sqlContext.sparkContext.emptyRDD[InternalRow].setName("empty"),
+            schema,
+            isStreaming = true
+          )
+        } else {
+          val batchRange = resolveBatchRange(start, end)
+          val batchData = getBatchData(batchRange)
+          batchData
+        }
     }
   }
 
@@ -132,15 +146,16 @@ class JDBCStreamSource(
   override def getOffset: Option[Offset] =
     if (currentOffset.isEmpty) {
       logInfo("No offset, will try to get it from the source.")
-      Try(initFirstOffset()) match {
-        case Success(_) => logInfo(s"Offsets retrieved from data: '$currentOffset'."); currentOffset
-        case Failure(ex) => logWarning(s"Not found offset in source table${ex.getStackTrace.mkString("\n")}"); None
-      }
+      initFirstOffset()
+      currentOffset
     } else {
-      getOffsetValue(desc) match {
-        case Some(candidateNewEndOffset) if candidateNewEndOffset != currentOffset.get.range.end.get =>
-          updateCurrentOffsets(newEndOffset = candidateNewEndOffset)
-          logInfo(s"New offset found: '$currentOffset'.")
+      val (_, max) = getOffsetValues
+      max match {
+        case Some(candidateNewEndOffset) =>
+          if (currentOffset.isEmpty || candidateNewEndOffset != currentOffset.get.range.end.get) {
+            updateCurrentOffsets(newEndOffset = candidateNewEndOffset)
+            logInfo(s"New offset found: '$currentOffset'.")
+          }
           currentOffset
         case _ =>
           logDebug(s"No new offset found. Previous offset: $currentOffset")
